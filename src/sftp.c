@@ -238,6 +238,18 @@ sftp_file sftp_open(sftp_session sftp, const char *filename, int flags,
     /* pack a new SFTP packet and send it using `sftp_packet_write` */
     // LAB: insert your code here.
 
+    if (ssh_buffer_add_u32(buffer, htonl(id)) ||
+        ssh_buffer_add_ssh_string(buffer, ssh_string_from_char(filename)) ||
+        ssh_buffer_add_u32(buffer, htonl(perm_flags)) ||
+        ssh_buffer_add_u32(buffer, htonl(attr_flags)) ||
+        ssh_buffer_add_u32(buffer, htonl(mode)) ||
+        (sftp_packet_write(sftp, SSH_FXP_OPEN, buffer) == SSH_ERROR))
+    {
+        ssh_buffer_free(buffer);
+        return NULL;
+    }
+    else
+        ssh_buffer_free(buffer);
 
     response = sftp_packet_read(sftp);
     if (response == NULL) {
@@ -249,13 +261,44 @@ sftp_file sftp_open(sftp_session sftp, const char *filename, int flags,
     switch (response->type) {
         case SSH_FXP_STATUS:
             // LAB: insert your code here.
+            LOG_INFO("Receive SSH_FXP_STATUS");
+            status = sftp_parse_status(response);
+            if (status->status)
+            {
+                LOG_INFO("Status -> id: %u, status: %u, errormsg: %s, lang_tag: %s.",
+                         status->id, status->status, status->errormsg, status->langtag);
+                ssh_set_error(SSH_FATAL, "%s\n", status->errormsg);
+                sftp_status_free(status);
+            }
+            else
+            {
+                LOG_ERROR("Fail to read status!");
+                ssh_set_error(SSH_FATAL, "Fail to read status!\n");
+            }
+            sftp_packet_free(response);
+            return NULL;
 
         case SSH_FXP_HANDLE:
             // LAB: insert your code here.
+            LOG_INFO("Receive SSH_FXP_HANDLE");
+            handle = sftp_parse_handle(response, id);
+            if (handle)
+                LOG_INFO("Success to read handle!");
+            else
+            {
+                LOG_ERROR("Fail to read handle!");
+                ssh_set_error(SSH_FATAL, "Fail to read handle!\n");
+            }
+            sftp_packet_free(response);
+            return handle;
 
         default:
             // LAB: insert your code here.
 
+            LOG_ERROR("unexpected SFTP packet type: %d", response->type);
+            ssh_set_error(SSH_FATAL, "unexpected SFTP packet type: %d\n", response->type);
+            sftp_packet_free(response);
+            return NULL;
     }
     return NULL;
 }
@@ -303,6 +346,42 @@ int sftp_close(sftp_file file) {
     switch (response->type) {
         // LAB: insert your code here.
 
+    case SSH_FXP_STATUS:
+
+        LOG_INFO("Receive SSH_FXP_STATUS");
+        status = sftp_parse_status(response);
+        if (status)
+        {
+            if (status->status == SSH_FX_OK)
+            {
+                LOG_INFO("Status -> id: %u, status: %u, errormsg: %s, lang_tag: %s.",
+                         status->id, status->status, status->errormsg, status->langtag);
+                rc = SSH_OK;
+            }
+            else
+            {
+                LOG_ERROR("Status -> id: %u, status: %u, errormsg: %s, lang_tag: %s.",
+                          status->id, status->status, status->errormsg, status->langtag);
+                rc = SSH_ERROR;
+                ssh_set_error(SSH_FATAL, "%s\n", status->errormsg);
+            }
+            sftp_status_free(status);
+        }
+        else
+        {
+            LOG_ERROR("Fail to read status!");
+            rc = SSH_ERROR;
+            ssh_set_error(SSH_FATAL, "Fail to read status!\n");
+        }
+        sftp_packet_free(response);
+        return rc;
+
+    default:
+
+        LOG_ERROR("unexpected SFTP packet type: %d", response->type);
+        ssh_set_error(SSH_FATAL, "unexpected SFTP packet type: %d\n", response->type);
+        sftp_packet_free(response);
+        return SSH_ERROR;
     }
 }
 
@@ -354,7 +433,66 @@ int32_t sftp_read(sftp_file file, void *buf, uint32_t count) {
     switch (response->type) {
         // LAB: insert your code here.
 
+    case SSH_FXP_STATUS:
+
+        LOG_INFO("Receive SSH_FXP_STATUS");
+        status = sftp_parse_status(response);
+        if (status)
+        {
+            if (status->status == SSH_FX_EOF)
+            {
+                LOG_INFO("Status -> id: %u, status: %u, errormsg: %s, lang_tag: %s.",
+                         status->id, status->status, status->errormsg, status->langtag);
+                rc = 0;
+            }
+            else
+            {
+                LOG_ERROR("Status -> id: %u, status: %u, errormsg: %s, lang_tag: %s.",
+                          status->id, status->status, status->errormsg, status->langtag);
+                rc = SSH_ERROR;
+                ssh_set_error(SSH_FATAL, "%s\n", status->errormsg);
+            }
+            sftp_status_free(status);
+        }
+        else
+        {
+            LOG_ERROR("Fail to read status!");
+            rc = SSH_ERROR;
+            ssh_set_error(SSH_FATAL, "Fail to read status!\n");
+        }
+        sftp_packet_free(response);
+        return rc;
+
+    case SSH_FXP_DATA:
+
+        LOG_INFO("Receive SSH_FXP_DATA");
+        if (ssh_buffer_get_u32(response->payload, &recv_id) &&
+            (data = ssh_buffer_get_ssh_string(response->payload)))
+        {
+            recvlen = ssh_string_len(data);
+            memcpy(buf, ssh_string_data(data), recvlen);
+            ssh_string_free(data);
+            file->offset += recvlen;
+            rc = recvlen;
+            LOG_INFO("receive bytes: %u, file offset to %lu.", recvlen, file->offset);
+        }
+        else
+        {
+            rc = SSH_ERROR;
+            LOG_ERROR("unexpected data packet!");
+            ssh_set_error(SSH_FATAL, "unexpected data packet!\n");
+        }
+        sftp_packet_free(response);
+        return rc;
+
+    default:
+
+        LOG_ERROR("unexpected SFTP packet type: %d", response->type);
+        ssh_set_error(SSH_FATAL, "unexpected SFTP packet type: %d\n", response->type);
+        sftp_packet_free(response);
+        return SSH_ERROR;
     }
+
     return SSH_ERROR;
 }
 
@@ -404,6 +542,45 @@ int32_t sftp_write(sftp_file file, const void *buf, uint32_t count) {
         switch (response->type) {
             // LAB: insert your code here.
 
+        case SSH_FXP_STATUS:
+
+            LOG_INFO("Receive SSH_FXP_STATUS");
+            status = sftp_parse_status(response);
+            if (status)
+            {
+                if (status->status == SSH_FX_OK)
+                {
+                    LOG_INFO("Status -> id: %u, status: %u, errormsg: %s, lang_tag: %s.",
+                             status->id, status->status, status->errormsg, status->langtag);
+                    nleft -= nwrite;
+                    file->offset += nwrite;
+                    LOG_INFO("send bytes: %u, file offset to %lu.", nwrite, file->offset);
+                    rc = SSH_OK;
+                }
+                else
+                {
+                    LOG_ERROR("Status -> id: %u, status: %u, errormsg: %s, lang_tag: %s.",
+                              status->id, status->status, status->errormsg, status->langtag);
+                    rc = SSH_ERROR;
+                    ssh_set_error(SSH_FATAL, "%s\n", status->errormsg);
+                }
+                sftp_status_free(status);
+            }
+            else
+            {
+                LOG_ERROR("Fail to read status!");
+                rc = SSH_ERROR;
+                ssh_set_error(SSH_FATAL, "Fail to read status!\n");
+            }
+            sftp_packet_free(response);
+            break;
+
+        default:
+
+            LOG_ERROR("unexpected SFTP packet type: %d", response->type);
+            ssh_set_error(SSH_FATAL, "unexpected SFTP packet type: %d\n", response->type);
+            sftp_packet_free(response);
+            return SSH_ERROR;
         }
     }
     return count - nleft;

@@ -82,11 +82,11 @@ static int dh_init_keypair(struct dh_keypair *keypair);
 static void dh_free_keypair(struct dh_keypair *keypair);
 
 static void ssh_dh_debug_crypto(struct ssh_crypto_struct *c) {
-#ifdef DEBUG_CRYPTO
+    // #ifdef DEBUG_CRYPTO
     const_bignum x = NULL, y = NULL, e = NULL, f = NULL;
 
-    ssh_dh_keypair_get_keys(c->dh_ctx, DH_CLIENT_KEYPAIR, &x, &e);
-    ssh_dh_keypair_get_keys(c->dh_ctx, DH_SERVER_KEYPAIR, &y, &f);
+    dh_keypair_get_keys(c->dh_ctx, DH_CLIENT_KEYPAIR, &x, &e);
+    dh_keypair_get_keys(c->dh_ctx, DH_SERVER_KEYPAIR, &y, &f);
     ssh_print_bignum("p", c->dh_ctx->modulus);
     ssh_print_bignum("g", c->dh_ctx->generator);
     ssh_print_bignum("x", x);
@@ -97,9 +97,9 @@ static void ssh_dh_debug_crypto(struct ssh_crypto_struct *c) {
     ssh_log_hexdump("Session server cookie", c->server_kex.cookie, 16);
     ssh_log_hexdump("Session client cookie", c->client_kex.cookie, 16);
     ssh_print_bignum("k", c->shared_secret);
-#else
+    // #else
     (void)c; /* UNUSED_PARAM */
-#endif
+    // #endif
 }
 
 static int dh_init(ssh_session session) {
@@ -600,6 +600,13 @@ static int dh_receive_reply(ssh_session session) {
     /* Waht should we do next? */
     // LAB: insert your code here.
 
+    rc = dh_compute_shared_secret(crypto->dh_ctx, DH_CLIENT_KEYPAIR, DH_SERVER_KEYPAIR, &crypto->shared_secret);
+    if (rc != SSH_OK)
+        return rc;
+
+    rc = dh_compute_session_id(session);
+    if (rc != SSH_OK)
+        return rc;
 
     /* Skip: verifies signature on H (session id) */
 
@@ -637,6 +644,8 @@ static int dh_set_new_keys(ssh_session session) {
     /* NEWKEYS received, now its time to activate encryption */
     // LAB: insert your code here.
 
+    crypto->used = 3;
+    session->current_crypto = crypto;
 
     /* next_crypto should be deprecated from now if re-kex is not supportes */
     session->next_crypto = NULL;

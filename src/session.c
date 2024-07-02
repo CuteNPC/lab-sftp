@@ -198,6 +198,16 @@ int receive_id_str(ssh_session session) {
         ssh_socket_read(session->socket, &buffer[i], 1);
         // LAB: insert your code here.
 
+        if (buffer[i] == '\n')
+        {
+            if (i <= 2 || buffer[i - 1] != '\r')
+                return SSH_ERROR;
+            buffer[i - 1] = '\0';
+            buffer[i] = '\0';
+            LOG_INFO("Received the other party's version: %s", buffer);
+            session->server_id_str = strdup(buffer);
+            return SSH_OK;
+        }
     }
     /* this line should not be reached */
     return SSH_ERROR;

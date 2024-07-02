@@ -19,6 +19,8 @@
 
 #define MAX_BUF_SIZE 16384
 
+char (*debugptr)[1024];
+
 void prompt() {
     fprintf(stdout, "%s", "sftp> ");
     fflush(stdout);
@@ -47,7 +49,7 @@ int get_file(sftp_session sftp) {
 
     file = sftp_open(sftp, filename, O_RDONLY, 0);
     if (file == NULL) {
-        fprintf(stderr, "Can not open remote file %s", filename);
+        fprintf(stderr, "Can not open remote file %s\n", filename);
         return -1;
     }
 

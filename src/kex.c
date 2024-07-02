@@ -186,6 +186,13 @@ int ssh_receive_kex(ssh_session session) {
         /* parse name-lists, don't forget to add `in_hashbuf` */
         // LAB: insert your code here.
 
+        if ((str = ssh_buffer_get_ssh_string(session->in_buffer)) == NULL)
+            goto error;
+        strings[i] = ssh_string_to_char(str);
+        LOG_INFO("Receive kex strings[%d]: %s", i, strings[i]);
+        if ((rc = ssh_buffer_add_ssh_string(session->in_hashbuf, str)) != SSH_OK)
+            goto error;
+        ssh_string_free(str);
     }
 
     rc = ssh_buffer_unpack(session->in_buffer, "bd", &first_kex_follows,
@@ -231,6 +238,24 @@ int ssh_select_kex(ssh_session session) {
         /* select negotiated algorithms and store them in `next_crypto->kex_methods` */
         // LAB: insert your code here.
 
+        if (strlen(client->methods[i]) == 0)
+        {
+            session->next_crypto->kex_methods[i] = "";
+            LOG_INFO("Select kex_methods[%d]: %s", i, session->next_crypto->kex_methods[i]);
+            continue;
+        }
+        char *method = NULL;
+        method = strtok(server->methods[i], ",");
+        while (method)
+        {
+            if (strcmp(client->methods[i], method) == 0)
+            {
+                session->next_crypto->kex_methods[i] = method;
+                LOG_INFO("Select kex_methods[%d]: %s", i, session->next_crypto->kex_methods[i]);
+                break;
+            }
+            method = strtok(NULL, ",");
+        }
     }
     session->next_crypto->kex_type = SSH_KEX_DH_GROUP14_SHA256;
     return SSH_OK;

@@ -123,17 +123,68 @@ int ssh_userauth_password(ssh_session session, const char *password) {
         switch (type) {
             case SSH_MSG_USERAUTH_BANNER:
                 // LAB: insert your code here.
+                uint8_t error1 = 0;
+                ssh_string message, lang_tag;
+                LOG_INFO("Receive SSH_MSG_USERAUTH_BANNER");
+                if ((message = ssh_buffer_get_ssh_string(session->in_buffer)) == NULL)
+                    error1 = 1;
+                if ((lang_tag = ssh_buffer_get_ssh_string(session->in_buffer)) == NULL)
+                    error1 = 1;
+                if (error1)
+                {
+                    ssh_string_free(message);
+                    ssh_string_free(lang_tag);
+                    LOG_ERROR("unexpected data format");
+                    ssh_set_error(SSH_FATAL, "unexpected data format.\n");
+                    goto error;
+                }
+                LOG_INFO("message: %s, lang_tag: %s.", message->data, lang_tag->data);
+                ssh_set_error(SSH_REQUEST_DENIED, "message: %s, lang_tag: %s.\n", message->data, lang_tag->data);
+                ssh_string_free(message);
+                ssh_string_free(lang_tag);
+                break;
 
             case SSH_MSG_USERAUTH_SUCCESS:
                 // LAB: insert your code here.
+                LOG_INFO("Receive SSH_MSG_USERAUTH_SUCCESS");
+                return SSH_OK;
 
             case SSH_MSG_USERAUTH_PASSWD_CHANGEREQ:
+                LOG_INFO("Receive SSH_MSG_USERAUTH_PASSWD_CHANGEREQ");
+                ssh_set_error(SSH_FATAL, "password change not implemented.\n");
+                goto error;
+
             case SSH_MSG_USERAUTH_FAILURE:
                 // LAB: insert your code here.
+                uint8_t error2 = 0, partial_success = 0;
+                ssh_string name_list;
+                LOG_INFO("Receive SSH_MSG_USERAUTH_FAILURE");
+                if ((name_list = ssh_buffer_get_ssh_string(session->in_buffer)) == NULL)
+                    error2 = 1;
+                if (ssh_buffer_get_u8(session->in_buffer, &partial_success) == 0)
+                    error2 = 1;
+                if (error2)
+                {
+                    ssh_string_free(name_list);
+                    ssh_set_error(SSH_FATAL, "unexpected data format.\n");
+                    goto error;
+                }
+                LOG_INFO("name-list: %s, partial_success: %d.", name_list->data, partial_success);
+                ssh_string_free(name_list);
+                ssh_set_error(SSH_REQUEST_DENIED, "password error, please try again.\n");
+                return SSH_AGAIN;
+
+            case SSH_MSG_DISCONNECT:
+                LOG_INFO("Receive SSH_MSG_DISCONNECT");
+                ssh_set_error(SSH_REQUEST_DENIED, "disconnected.\n");
+                goto error;
 
             default:
                 // LAB: insert your code here.
 
+                LOG_ERROR("unexpected type: %d", type);
+                ssh_set_error(SSH_FATAL, "unexpected type: %d.\n", type);
+                goto error;
         }
     }
 

@@ -100,9 +100,72 @@ static int channel_open(ssh_channel channel, const char *type, uint32_t window,
         switch (reply_type) {
             case SSH_MSG_CHANNEL_OPEN_CONFIRMATION:
                 // LAB: insert your code here.
+                LOG_INFO("Receive SSH_MSG_CHANNEL_OPEN_CONFIRMATION");
+                uint8_t error1 = 0;
+
+                if (!ssh_buffer_get_u32(session->in_buffer, &recipient_channel))
+                    error1 = 1;
+                recipient_channel = ntohl(recipient_channel);
+
+                if (!ssh_buffer_get_u32(session->in_buffer, &channel->remote_channel))
+                    error1 = 1;
+                channel->remote_channel = ntohl(channel->remote_channel);
+
+                if (!ssh_buffer_get_u32(session->in_buffer, &channel->remote_window))
+                    error1 = 1;
+                channel->remote_window = ntohl(channel->remote_window);
+
+                if (!ssh_buffer_get_u32(session->in_buffer, &channel->remote_maxpacket))
+                    error1 = 1;
+                channel->remote_maxpacket = ntohl(channel->remote_maxpacket);
+
+                if (error1)
+                {
+                    LOG_ERROR("unexpected data format.");
+                    return SSH_ERROR;
+                }
+
+                LOG_INFO("recipient_channel: %u", recipient_channel);
+                LOG_INFO("remote_channel: %u", channel->remote_channel);
+                LOG_INFO("remote_window: %u", channel->remote_window);
+                LOG_INFO("remote_maxpacket: %u", channel->remote_maxpacket);
+                return SSH_OK;
 
             case SSH_MSG_CHANNEL_OPEN_FAILURE:
                 // LAB: insert your code here.
+                LOG_INFO("Receive SSH_MSG_CHANNEL_OPEN_FAILURE");
+                uint8_t error2 = 0;
+                ssh_string description, lang_tag;
+
+                if (!ssh_buffer_get_u32(session->in_buffer, &recipient_channel))
+                    error2 = 1;
+                recipient_channel = ntohl(recipient_channel);
+
+                if (!ssh_buffer_get_u32(session->in_buffer, &reason_code))
+                    error2 = 1;
+                reason_code = ntohl(reason_code);
+
+                if ((description = ssh_buffer_get_ssh_string(session->in_buffer)) == NULL)
+                    error2 = 1;
+
+                if ((lang_tag = ssh_buffer_get_ssh_string(session->in_buffer)) == NULL)
+                    error2 = 1;
+
+                if (error2)
+                {
+                    ssh_string_free(description);
+                    ssh_string_free(lang_tag);
+                    LOG_ERROR("unexpected data format.");
+                    return SSH_ERROR;
+                }
+
+                LOG_INFO("recipient_channel: %u", recipient_channel);
+                LOG_INFO("reason_code: %u", reason_code);
+                LOG_INFO("description : %s", description->data);
+                LOG_INFO("lang_tag: %s", lang_tag->data);
+                ssh_string_free(description);
+                ssh_string_free(lang_tag);
+                return SSH_ERROR;
 
             case SSH_MSG_GLOBAL_REQUEST:
                 /**
@@ -123,10 +186,35 @@ static int channel_open(ssh_channel channel, const char *type, uint32_t window,
                  *
                  */
                 // LAB: insert your code here.
+                LOG_INFO("Receive SSH_MSG_GLOBAL_REQUEST");
+                ssh_string string;
+                uint8_t error3 = 0;
+                if ((string = ssh_buffer_get_ssh_string(session->in_buffer)) == NULL)
+                    error3 = 1;
+                if (!ssh_buffer_get_u8(session->in_buffer, (uint8_t *)&want))
+                    error3 = 1;
+
+                if (error3)
+                {
+                    ssh_string_free(string);
+                    LOG_ERROR("unexpected data format.");
+                    return SSH_ERROR;
+                }
+                ssh_string_free(string);
+                LOG_INFO("string: %s", string->data);
+                LOG_INFO("want: %u", want);
+                if (want)
+                {
+                    LOG_ERROR("Want.");
+                    return SSH_ERROR;
+                }
+                break;
 
             default:
                 // LAB: insert your code here.
 
+                LOG_ERROR("unexpected type: %d", reply_type);
+                return SSH_ERROR;
         }
     }
 
@@ -490,6 +578,11 @@ int ssh_channel_read(ssh_channel channel, void *dest, uint32_t count) {
             /* try to read channel data from static buffer first */
             // LAB: insert your code here.
 
+            effectivelen = MIN(count, ssh_buffer_get_len(buf));
+            ssh_buffer_get_data(buf, dest, effectivelen);
+            count -= effectivelen;
+            nread += effectivelen;
+            channel->local_window = MIN(0, channel->local_window - effectivelen);
         } else {
             /* static buffer has insufficient data, read another
              * SSH_MSG_CHANNEL_DATA packet */
@@ -509,22 +602,65 @@ int ssh_channel_read(ssh_channel channel, void *dest, uint32_t count) {
                 case SSH_MSG_CHANNEL_WINDOW_ADJUST:
                     /* window adjust message could happen here */
                     // LAB: insert your code here.
+                    LOG_INFO("Receive SSH_MSG_CHANNEL_WINDOW_ADJUST");
+                    if (!ssh_buffer_get_u32(session->in_buffer, &bytes_to_add))
+                        goto error;
+                    channel->remote_window += ntohl(bytes_to_add);
+                    break;
 
                 case SSH_MSG_CHANNEL_DATA:
                     // LAB: insert your code here.
+                    LOG_INFO("Receive SSH_MSG_CHANNEL_DATA");
+                    uint32_t data_type = 0;
+                    if (!ssh_buffer_get_u32(session->in_buffer, &data_type))
+                        goto error;
+                    if (ssh_buffer_add_buffer(buf, session->in_buffer))
+                        goto error;
+                    LOG_INFO("data_type: %u", bytes_to_add);
+                    break;
 
                 case SSH_MSG_CHANNEL_EOF:
                     // LAB: insert your code here.
+                    LOG_INFO("Receive SSH_MSG_CHANNEL_EOF");
+                    channel->remote_eof = true;
+                    break;
 
                 case SSH_MSG_CHANNEL_CLOSE:
                     // LAB: insert your code here.
+                    LOG_INFO("Receive SSH_MSG_CHANNEL_CLOSE");
+                    goto cleanup;
 
                 case SSH_MSG_CHANNEL_REQUEST:
                     // LAB: insert your code here.
+                    LOG_INFO("Receive SSH_MSG_GLOBAL_REQUEST");
+                    ssh_string string;
+                    uint8_t error3 = 0;
+                    if ((string = ssh_buffer_get_ssh_string(session->in_buffer)) == NULL)
+                        error3 = 1;
+                    if (!ssh_buffer_get_u8(session->in_buffer, (uint8_t *)&want))
+                        error3 = 1;
+
+                    if (error3)
+                    {
+                        ssh_string_free(string);
+                        LOG_ERROR("unexpected data format.");
+                        return SSH_ERROR;
+                    }
+                    ssh_string_free(string);
+                    LOG_INFO("string: %s", string->data);
+                    LOG_INFO("want: %u", want);
+                    if (want)
+                    {
+                        LOG_ERROR("Want.");
+                        return SSH_ERROR;
+                    }
+                    break;
 
                 default:
                     // LAB: insert your code here.
 
+                    LOG_ERROR("unexpected type: %d", type);
+                    goto error;
             }
         }
     }
